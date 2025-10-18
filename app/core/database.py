@@ -59,6 +59,7 @@ async def init_db():
     """
     async with engine.begin() as conn:
         # Import all models here to ensure they are registered with Base
+        from app.models import User, Document, DocumentChunk
 
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)

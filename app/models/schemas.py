@@ -4,7 +4,7 @@ Pydantic schemas for data validation and serialization.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field, validator
 
@@ -162,3 +162,124 @@ class PasswordResetConfirm(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError("Password must contain at least one digit")
         return v
+
+
+# Document schemas
+class DocumentBase(BaseModel):
+    """Base document schema."""
+
+    description: Optional[str] = None
+
+
+class DocumentCreate(DocumentBase):
+    """Schema for document creation."""
+
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    content_type: str
+    file_path: str
+    user_id: int
+
+
+class DocumentUpdate(BaseModel):
+    """Schema for updating document metadata."""
+
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class DocumentResponse(DocumentBase):
+    """Schema for document response."""
+
+    id: int
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    content_type: str
+    file_path: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    user_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentChunkBase(BaseModel):
+    """Base document chunk schema."""
+
+    content: str
+    token_count: Optional[int] = None
+
+
+class DocumentChunkCreate(DocumentChunkBase):
+    """Schema for creating document chunk."""
+
+    document_id: int
+    chunk_index: int
+    embedding: List[float]
+
+
+class DocumentChunkResponse(DocumentChunkBase):
+    """Schema for document chunk response."""
+
+    id: int
+    document_id: int
+    chunk_index: int
+    embedding: List[float]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentWithChunks(DocumentResponse):
+    """Schema for document with its chunks."""
+
+    chunks: List[DocumentChunkResponse] = []
+
+
+# Search schemas
+class SearchQuery(BaseModel):
+    """Schema for search query."""
+
+    query: str = Field(..., min_length=1, max_length=1000)
+    limit: int = Field(10, ge=1, le=100)
+    threshold: float = Field(0.7, ge=0.0, le=1.0)
+
+
+class SearchResult(BaseModel):
+    """Schema for individual search result."""
+
+    document_id: int
+    document_filename: str
+    document_title: Optional[str] = None
+    chunk_id: int
+    chunk_content: str
+    similarity_score: float
+    chunk_index: int
+
+
+class SearchResponse(BaseModel):
+    """Schema for search response."""
+
+    query: str
+    total_results: int
+    results: List[SearchResult]
+    search_time: float  # in seconds
+
+
+# File upload schemas
+class FileUploadResponse(BaseModel):
+    """Schema for file upload response."""
+
+    message: str
+    document_id: int
+    filename: str
+    file_size: int
+    file_type: str
+    processing_status: str

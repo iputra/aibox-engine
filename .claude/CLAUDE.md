@@ -4,6 +4,7 @@ See @README for project overview.
 
 - LOGGING: use logging instead of print.
 - ENVIRONMENT: use python virtual environment from venv directory.
+- LINT: use ruff to lint the code.
 - CODE:
   - when writing code, please implement the code that easy to understand by human, maintanable, and modular so the code clean and testable. Also, please be careful when modularizing the code, to not over modularize the code.
   - please don't hardcode any credential, put the credential in the config or environment variable file.
