@@ -2,31 +2,26 @@
 Database configuration and connection management for AIBox Engine.
 """
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import MetaData
 from decouple import config
-import asyncio
+from sqlalchemy import MetaData
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.declarative import declarative_base
+
 
 # Database configuration
 DATABASE_URL = config(
-    'DATABASE_URL',
-    default='postgresql+asyncpg://neondb_owner:npg_BTE5vSu4KWtO@ep-aged-unit-advtc9a5-pooler.c-2.us-east-1.aws.neon.tech/neondb'
+    "DATABASE_URL",
+    default="postgresql+asyncpg://neondb_owner:npg_BTE5vSu4KWtO@ep-aged-unit-advtc9a5-pooler.c-2.us-east-1.aws.neon.tech/neondb",
 )
 
 # Create async engine
 engine = create_async_engine(
     DATABASE_URL,
-    echo=config('DEBUG', default=False, cast=bool),
+    echo=config("DEBUG", default=False, cast=bool),
     future=True,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={
-        "ssl": True,
-        "server_settings": {
-            "application_name": "aibox_engine"
-        }
-    }
+    connect_args={"ssl": True, "server_settings": {"application_name": "aibox_engine"}},
 )
 
 # Create async session factory
@@ -64,7 +59,6 @@ async def init_db():
     """
     async with engine.begin() as conn:
         # Import all models here to ensure they are registered with Base
-        from app.models.user import User
 
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)
@@ -90,6 +84,7 @@ async def test_db_connection():
         async with engine.connect() as conn:
             # Use text() for raw SQL queries
             from sqlalchemy import text
+
             result = await conn.execute(text("SELECT 1"))
             print("✅ Database connection successful")
             return True

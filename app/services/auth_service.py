@@ -3,25 +3,32 @@ Authentication service for AIBox Engine.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status
+from typing import Optional
 
-from app.models.user import User
-from app.models.schemas import (
-    UserCreate, UserLogin, UserUpdate, Token, TokenData,
-    UserRole, PasswordChange
-)
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.security import (
-    verify_password, get_password_hash,
-    create_access_token, create_refresh_token,
-    verify_token, verify_refresh_token,
-    create_password_reset_token, verify_password_reset_token,
-    AuthenticationError, AuthorizationError
+    AuthenticationError,
+    create_access_token,
+    create_password_reset_token,
+    create_refresh_token,
+    get_password_hash,
+    verify_password,
+    verify_password_reset_token,
+    verify_refresh_token,
+    verify_token,
 )
-from app.core.database import get_db
+from app.models.schemas import (
+    PasswordChange,
+    Token,
+    UserCreate,
+    UserLogin,
+    UserRole,
+    UserUpdate,
+)
+from app.models.user import User
 
 
 class AuthService:
@@ -40,9 +47,7 @@ class AuthService:
         Returns:
             User: User object or None if not found
         """
-        result = await self.db.execute(
-            select(User).where(User.id == user_id)
-        )
+        result = await self.db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
     async def get_user_by_username(self, username: str) -> Optional[User]:
@@ -55,9 +60,7 @@ class AuthService:
         Returns:
             User: User object or None if not found
         """
-        result = await self.db.execute(
-            select(User).where(User.username == username)
-        )
+        result = await self.db.execute(select(User).where(User.username == username))
         return result.scalar_one_or_none()
 
     async def get_user_by_email(self, email: str) -> Optional[User]:
@@ -70,9 +73,7 @@ class AuthService:
         Returns:
             User: User object or None if not found
         """
-        result = await self.db.execute(
-            select(User).where(User.email == email)
-        )
+        result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
     async def get_user_by_username_or_email(self, identifier: str) -> Optional[User]:
@@ -110,7 +111,7 @@ class AuthService:
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username already registered"
+                detail="Username already registered",
             )
 
         # Check if email already exists
@@ -118,7 +119,7 @@ class AuthService:
         if existing_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                detail="Email already registered",
             )
 
         # Create new user
@@ -132,7 +133,7 @@ class AuthService:
             avatar_url=user_data.avatar_url,
             role=user_data.role,
             is_active=True,
-            is_verified=False
+            is_verified=False,
         )
 
         self.db.add(db_user)
@@ -161,8 +162,7 @@ class AuthService:
 
         if not user.is_active:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Account is inactive"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Account is inactive"
             )
 
         # Update last login
@@ -184,29 +184,22 @@ class AuthService:
         # Create access token
         access_token_expires = timedelta(minutes=30)
         access_token = create_access_token(
-            data={
-                "sub": user.username,
-                "user_id": user.id,
-                "role": user.role
-            },
-            expires_delta=access_token_expires
+            data={"sub": user.username, "user_id": user.id, "role": user.role},
+            expires_delta=access_token_expires,
         )
 
         # Create refresh token
         refresh_token_expires = timedelta(days=7)
         refresh_token = create_refresh_token(
-            data={
-                "sub": user.username,
-                "user_id": user.id
-            },
-            expires_delta=refresh_token_expires
+            data={"sub": user.username, "user_id": user.id},
+            expires_delta=refresh_token_expires,
         )
 
         return Token(
             access_token=access_token,
             token_type="bearer",
             expires_in=int(access_token_expires.total_seconds()),
-            refresh_token=refresh_token
+            refresh_token=refresh_token,
         )
 
     async def refresh_access_token(self, refresh_token: str) -> Token:
@@ -257,7 +250,7 @@ class AuthService:
             if existing_email:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already registered"
+                    detail="Email already registered",
                 )
             user.email = user_data.email.lower()
 
@@ -275,7 +268,9 @@ class AuthService:
 
         return user
 
-    async def change_password(self, user_id: int, password_data: PasswordChange) -> bool:
+    async def change_password(
+        self, user_id: int, password_data: PasswordChange
+    ) -> bool:
         """
         Change user password.
 
@@ -293,14 +288,13 @@ class AuthService:
 
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
         if not verify_password(password_data.current_password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
+                detail="Current password is incorrect",
             )
 
         user.hashed_password = get_password_hash(password_data.new_password)
@@ -345,15 +339,14 @@ class AuthService:
         if not email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset token"
+                detail="Invalid or expired reset token",
             )
 
         user = await self.get_user_by_email(email)
 
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
         user.hashed_password = get_password_hash(new_password)
@@ -384,9 +377,7 @@ class AuthService:
 
         return user
 
-    async def check_user_permission(
-        self, user: User, required_role: UserRole
-    ) -> bool:
+    async def check_user_permission(self, user: User, required_role: UserRole) -> bool:
         """
         Check if user has required role.
 

@@ -4,15 +4,16 @@ AIBox Engine - FastAPI Application
 FastAPI-based service for LLM inference, document indexing, and authentication system with GPU acceleration.
 """
 
-from fastapi import FastAPI
-from scalar_fastapi import get_scalar_api_reference
-from fastapi.responses import HTMLResponse
-from decouple import config
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from scalar_fastapi import get_scalar_api_reference
+
+from app.api import auth
 
 # Core modules
 from app.core.database import init_db, test_db_connection
-from app.api import auth
 
 
 @asynccontextmanager
@@ -46,7 +47,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url=None,  # Disable classic Swagger UI
     redoc_url=None,  # Disable ReDoc
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -108,11 +109,7 @@ async def health_check():
     Returns:
         dict: Health status of the service
     """
-    return {
-        "status": "healthy",
-        "service": "AIBox Engine",
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "service": "AIBox Engine", "version": "1.0.0"}
 
 
 @app.get("/info")
@@ -130,7 +127,7 @@ async def app_info():
         "docs_url": "/docs",
         "docs_type": "Scalar API Documentation",
         "health_check": "/health",
-        "welcome_page": "/"
+        "welcome_page": "/",
     }
 
 
@@ -148,9 +145,5 @@ if __name__ == "__main__":
 
     # Development server configuration
     uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        "app.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
     )

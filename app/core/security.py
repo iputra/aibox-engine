@@ -3,11 +3,13 @@ Security utilities for AIBox Engine authentication system.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Union
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+from typing import Optional
+
 from decouple import config
 from fastapi import HTTPException, status
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
 from app.models.schemas import TokenData, UserRole
 
 
@@ -15,13 +17,12 @@ from app.models.schemas import TokenData, UserRole
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT Configuration
-SECRET_KEY = config(
-    'SECRET_KEY',
-    default='your-secret-key-here-change-in-production'
+SECRET_KEY = config("SECRET_KEY", default="your-secret-key-here-change-in-production")
+JWT_ALGORITHM = config("JWT_ALGORITHM", default="HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = config(
+    "ACCESS_TOKEN_EXPIRE_MINUTES", default=30, cast=int
 )
-JWT_ALGORITHM = config('JWT_ALGORITHM', default='HS256')
-ACCESS_TOKEN_EXPIRE_MINUTES = config('ACCESS_TOKEN_EXPIRE_MINUTES', default=30, cast=int)
-REFRESH_TOKEN_EXPIRE_DAYS = config('REFRESH_TOKEN_EXPIRE_DAYS', default=7, cast=int)
+REFRESH_TOKEN_EXPIRE_DAYS = config("REFRESH_TOKEN_EXPIRE_DAYS", default=7, cast=int)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -49,16 +50,13 @@ def get_password_hash(password: str) -> str:
         str: Hashed password
     """
     # bcrypt has a 72 byte limit, truncate if necessary
-    password_bytes = password.encode('utf-8')
+    password_bytes = password.encode("utf-8")
     if len(password_bytes) > 72:
-        password = password_bytes[:72].decode('utf-8', errors='ignore')
+        password = password_bytes[:72].decode("utf-8", errors="ignore")
     return pwd_context.hash(password)
 
 
-def create_access_token(
-    data: dict,
-    expires_delta: Optional[timedelta] = None
-) -> str:
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a JWT access token.
 
@@ -81,10 +79,7 @@ def create_access_token(
     return encoded_jwt
 
 
-def create_refresh_token(
-    data: dict,
-    expires_delta: Optional[timedelta] = None
-) -> str:
+def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a JWT refresh token.
 
@@ -133,7 +128,9 @@ def verify_token(token: str) -> Optional[TokenData]:
         return TokenData(
             username=username,
             user_id=user_id,
-            role=UserRole(role) if role in [UserRole.USER.value, UserRole.ADMIN.value] else UserRole.USER
+            role=UserRole(role)
+            if role in [UserRole.USER.value, UserRole.ADMIN.value]
+            else UserRole.USER,
         )
     except JWTError:
         return None
@@ -164,7 +161,7 @@ def verify_refresh_token(token: str) -> Optional[TokenData]:
         return TokenData(
             username=username,
             user_id=user_id,
-            role=None  # Role not needed for refresh token
+            role=None,  # Role not needed for refresh token
         )
     except JWTError:
         return None
@@ -249,6 +246,7 @@ def check_permission(user_role: UserRole, required_role: UserRole) -> bool:
 
 class AuthenticationError(HTTPException):
     """Custom authentication error."""
+
     def __init__(self, detail: str = "Authentication failed"):
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -259,6 +257,7 @@ class AuthenticationError(HTTPException):
 
 class AuthorizationError(HTTPException):
     """Custom authorization error."""
+
     def __init__(self, detail: str = "Access denied"):
         super().__init__(
             status_code=status.HTTP_403_FORBIDDEN,

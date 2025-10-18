@@ -3,21 +3,29 @@ Authentication API endpoints for AIBox Engine.
 """
 
 from datetime import datetime
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.services.auth_service import AuthService
+from app.core.security import AuthenticationError
 from app.models.schemas import (
-    UserCreate, UserLogin, UserResponse, UserResponseSafe,
-    Token, UserUpdate, PasswordChange, PasswordReset,
-    PasswordResetConfirm, UserRole
+    PasswordChange,
+    PasswordReset,
+    PasswordResetConfirm,
+    Token,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    UserResponseSafe,
+    UserRole,
+    UserUpdate,
 )
 from app.models.user import User
-from app.core.security import AuthenticationError, AuthorizationError
+from app.services.auth_service import AuthService
+
 
 # Router configuration
 router = APIRouter(tags=["Authentication"])
@@ -26,12 +34,14 @@ security = HTTPBearer()
 
 class MessageResponse(BaseModel):
     """Standard message response."""
+
     message: str
     success: bool = True
 
 
 class UserListResponse(BaseModel):
     """Response for user list endpoint."""
+
     users: list[UserResponseSafe]
     total: int
     page: int
@@ -41,7 +51,7 @@ class UserListResponse(BaseModel):
 # Helper functions
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """
     Get current authenticated user.
@@ -70,7 +80,7 @@ async def get_current_user(
 
 
 async def get_current_active_user(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ) -> User:
     """
     Get current active user.
@@ -86,14 +96,13 @@ async def get_current_active_user(
     """
     if not current_user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
     return current_user
 
 
 async def get_current_admin_user(
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ) -> User:
     """
     Get current admin user.
@@ -109,18 +118,16 @@ async def get_current_admin_user(
     """
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
         )
     return current_user
 
 
 # Public endpoints (no authentication required)
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    user_data: UserCreate,
-    db: AsyncSession = Depends(get_db)
-):
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     """
     Register a new user.
 
@@ -137,10 +144,7 @@ async def register(
 
 
 @router.post("/login", response_model=Token)
-async def login(
-    login_data: UserLogin,
-    db: AsyncSession = Depends(get_db)
-):
+async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
     """
     Authenticate user and return tokens.
 
@@ -167,13 +171,13 @@ async def login(
 
 class RefreshTokenRequest(BaseModel):
     """Request model for token refresh."""
+
     refresh_token: str = Field(..., description="Refresh token")
 
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    request: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db)
+    request: RefreshTokenRequest, db: AsyncSession = Depends(get_db)
 ):
     """
     Refresh access token.
@@ -190,16 +194,12 @@ async def refresh_token(
         tokens = await auth_service.refresh_access_token(request.refresh_token)
         return tokens
     except AuthenticationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
-    email_data: PasswordReset,
-    db: AsyncSession = Depends(get_db)
+    email_data: PasswordReset, db: AsyncSession = Depends(get_db)
 ):
     """
     Request password reset.
@@ -225,8 +225,7 @@ async def forgot_password(
 
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(
-    reset_data: PasswordResetConfirm,
-    db: AsyncSession = Depends(get_db)
+    reset_data: PasswordResetConfirm, db: AsyncSession = Depends(get_db)
 ):
     """
     Reset password using token.
@@ -248,9 +247,7 @@ async def reset_password(
 
 # Protected endpoints (authentication required)
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
-    current_user: User = Depends(get_current_active_user)
-):
+async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """
     Get current user information.
 
@@ -267,7 +264,7 @@ async def get_current_user_info(
 async def update_current_user(
     user_data: UserUpdate,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Update current user profile.
@@ -285,8 +282,7 @@ async def update_current_user(
 
     if not updated_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return UserResponse.from_orm(updated_user)
@@ -296,7 +292,7 @@ async def update_current_user(
 async def change_password(
     password_data: PasswordChange,
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Change current user password.
@@ -323,7 +319,7 @@ async def list_users(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(10, ge=1, le=100, description="Items per page"),
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     List all users (admin only).
@@ -339,7 +335,7 @@ async def list_users(
     """
     # This is a simple implementation - in production, you might want to add
     # filtering, sorting, and more sophisticated pagination
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
 
     # Get total count
     count_result = await db.execute(select(func.count(User.id)))
@@ -348,20 +344,14 @@ async def list_users(
     # Get users with pagination
     offset = (page - 1) * per_page
     result = await db.execute(
-        select(User)
-        .offset(offset)
-        .limit(per_page)
-        .order_by(User.created_at.desc())
+        select(User).offset(offset).limit(per_page).order_by(User.created_at.desc())
     )
     users = result.scalars().all()
 
     user_responses = [UserResponseSafe.from_orm(user) for user in users]
 
     return UserListResponse(
-        users=user_responses,
-        total=total,
-        page=page,
-        per_page=per_page
+        users=user_responses, total=total, page=page, per_page=per_page
     )
 
 
@@ -369,7 +359,7 @@ async def list_users(
 async def get_user_by_id(
     user_id: int,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get user by ID (admin only).
@@ -387,8 +377,7 @@ async def get_user_by_id(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return UserResponse.from_orm(user)
@@ -399,7 +388,7 @@ async def update_user_role(
     user_id: int,
     role: UserRole,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Update user role (admin only).
@@ -418,15 +407,14 @@ async def update_user_role(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     # Prevent admin from changing their own role
     if user.id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change your own role"
+            detail="Cannot change your own role",
         )
 
     user.role = role
@@ -440,7 +428,7 @@ async def update_user_role(
 async def deactivate_user(
     user_id: int,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Deactivate user account (admin only).
@@ -458,15 +446,14 @@ async def deactivate_user(
 
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     # Prevent admin from deactivating themselves
     if user.id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot deactivate your own account"
+            detail="Cannot deactivate your own account",
         )
 
     user.is_active = False
@@ -480,7 +467,7 @@ async def deactivate_user(
 async def delete_user(
     user_id: int,
     current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Fully delete user from database (admin only).
@@ -497,7 +484,7 @@ async def delete_user(
     if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own account"
+            detail="Cannot delete your own account",
         )
 
     auth_service = AuthService(db)
@@ -505,8 +492,7 @@ async def delete_user(
 
     if not deleted:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return MessageResponse(message="User account fully deleted successfully")

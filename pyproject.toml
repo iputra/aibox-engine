@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aibox-engine"
+version = "0.1.0"
+description = "AI Box Engine Project"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[tool.ruff]
+# Exclude common directories
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    ".pytest_cache",
+    ".mypy_cache",
+]
+
+# Line length
+line-length = 88
+
+# Target Python version
+target-version = "py38"
+
+[tool.ruff.lint]
+# Enable specific rule sets
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "TCH001", # typing-only import in non-typing context
+    "TCH002", # typing-only import in non-typing context
+    "TCH003", # typing-only import in non-typing context
+]
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+# Indent with spaces
+indent-style = "space"
+# Line ending style
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+# Sort imports case-insensitively
+case-sensitive = false
+# Force single line imports
+force-single-line = false
+# Combine as imports on a single line
+combine-as-imports = true
+# Split on trailing comma
+split-on-trailing-comma = true
+# Lines after imports
+lines-after-imports = 2

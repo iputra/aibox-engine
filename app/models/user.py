@@ -2,9 +2,9 @@
 User model for AIBox Engine authentication system.
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+
 from app.core.database import Base
 
 
@@ -12,6 +12,7 @@ class User(Base):
     """
     User model for authentication and user management.
     """
+
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
