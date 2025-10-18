@@ -48,6 +48,12 @@ class UserListResponse(BaseModel):
     per_page: int
 
 
+class RefreshTokenRequest(BaseModel):
+    """Request model for token refresh."""
+
+    refresh_token: str = Field(..., description="Refresh token")
+
+
 # Helper functions
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -123,80 +129,33 @@ async def get_current_admin_user(
     return current_user
 
 
-# Public endpoints (no authentication required)
-@router.post(
-    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
-)
-async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Register a new user.
-
-    Args:
-        user_data: User registration data
-        db: Database session
-
-    Returns:
-        UserResponse: Created user data
-    """
-    auth_service = AuthService(db)
-    user = await auth_service.create_user(user_data)
-    return UserResponse.from_orm(user)
-
-
-@router.post("/login", response_model=Token)
-async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """
-    Authenticate user and return tokens.
-
-    Args:
-        login_data: Login credentials
-        db: Database session
-
-    Returns:
-        Token: Access and refresh tokens
-    """
-    auth_service = AuthService(db)
-    user = await auth_service.authenticate_user(login_data)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    tokens = await auth_service.create_user_tokens(user)
-    return tokens
-
-
-class RefreshTokenRequest(BaseModel):
-    """Request model for token refresh."""
-
-    refresh_token: str = Field(..., description="Refresh token")
-
-
-@router.post("/refresh", response_model=Token)
-async def refresh_token(
-    request: RefreshTokenRequest, db: AsyncSession = Depends(get_db)
+# Change Password - Protected endpoint (authentication required)
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    password_data: PasswordChange,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
-    Refresh access token.
+    Change current user password.
 
     Args:
-        request: Refresh token request
+        password_data: Password change data
+        current_user: Current authenticated user
         db: Database session
 
     Returns:
-        Token: New access and refresh tokens
+        MessageResponse: Success message
     """
     auth_service = AuthService(db)
     try:
-        tokens = await auth_service.refresh_access_token(request.refresh_token)
-        return tokens
-    except AuthenticationError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+        await auth_service.change_password(current_user.id, password_data)
+        return MessageResponse(message="Password changed successfully")
+    except HTTPException as e:
+        raise e
 
 
+# Forgot Password - Public endpoint (no authentication required)
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(
     email_data: PasswordReset, db: AsyncSession = Depends(get_db)
@@ -223,29 +182,34 @@ async def forgot_password(
     )
 
 
-@router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(
-    reset_data: PasswordResetConfirm, db: AsyncSession = Depends(get_db)
-):
+# Login - Public endpoint (no authentication required)
+@router.post("/login", response_model=Token)
+async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
     """
-    Reset password using token.
+    Authenticate user and return tokens.
 
     Args:
-        reset_data: Reset token and new password
+        login_data: Login credentials
         db: Database session
 
     Returns:
-        MessageResponse: Success message
+        Token: Access and refresh tokens
     """
     auth_service = AuthService(db)
-    try:
-        await auth_service.reset_password(reset_data.token, reset_data.new_password)
-        return MessageResponse(message="Password has been reset successfully")
-    except HTTPException as e:
-        raise e
+    user = await auth_service.authenticate_user(login_data)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    tokens = await auth_service.create_user_tokens(user)
+    return tokens
 
 
-# Protected endpoints (authentication required)
+# Get Current User Info - Protected endpoint (authentication required)
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """
@@ -260,6 +224,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_active_
     return UserResponse.from_orm(current_user)
 
 
+# Update Current User - Protected endpoint (authentication required)
 @router.put("/me", response_model=UserResponse)
 async def update_current_user(
     user_data: UserUpdate,
@@ -288,18 +253,59 @@ async def update_current_user(
     return UserResponse.from_orm(updated_user)
 
 
-@router.post("/change-password", response_model=MessageResponse)
-async def change_password(
-    password_data: PasswordChange,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
+# Refresh Token - Public endpoint (no authentication required)
+@router.post("/refresh", response_model=Token)
+async def refresh_token(
+    request: RefreshTokenRequest, db: AsyncSession = Depends(get_db)
 ):
     """
-    Change current user password.
+    Refresh access token.
 
     Args:
-        password_data: Password change data
-        current_user: Current authenticated user
+        request: Refresh token request
+        db: Database session
+
+    Returns:
+        Token: New access and refresh tokens
+    """
+    auth_service = AuthService(db)
+    try:
+        tokens = await auth_service.refresh_access_token(request.refresh_token)
+        return tokens
+    except AuthenticationError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+
+# Register - Public endpoint (no authentication required)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
+async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    """
+    Register a new user.
+
+    Args:
+        user_data: User registration data
+        db: Database session
+
+    Returns:
+        UserResponse: Created user data
+    """
+    auth_service = AuthService(db)
+    user = await auth_service.create_user(user_data)
+    return UserResponse.from_orm(user)
+
+
+# Reset Password - Public endpoint (no authentication required)
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    reset_data: PasswordResetConfirm, db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset password using token.
+
+    Args:
+        reset_data: Reset token and new password
         db: Database session
 
     Returns:
@@ -307,13 +313,15 @@ async def change_password(
     """
     auth_service = AuthService(db)
     try:
-        await auth_service.change_password(current_user.id, password_data)
-        return MessageResponse(message="Password changed successfully")
+        await auth_service.reset_password(reset_data.token, reset_data.new_password)
+        return MessageResponse(message="Password has been reset successfully")
     except HTTPException as e:
         raise e
 
 
 # Admin endpoints (admin role required)
+
+# List Users - Admin endpoint
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     page: int = Query(1, ge=1, description="Page number"),
@@ -355,6 +363,7 @@ async def list_users(
     )
 
 
+# Get User By ID - Admin endpoint
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user_by_id(
     user_id: int,
@@ -383,47 +392,7 @@ async def get_user_by_id(
     return UserResponse.from_orm(user)
 
 
-@router.put("/users/{user_id}/role", response_model=MessageResponse)
-async def update_user_role(
-    user_id: int,
-    role: UserRole,
-    current_user: User = Depends(get_current_admin_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Update user role (admin only).
-
-    Args:
-        user_id: User ID
-        role: New role
-        current_user: Current admin user
-        db: Database session
-
-    Returns:
-        MessageResponse: Success message
-    """
-    auth_service = AuthService(db)
-    user = await auth_service.get_user_by_id(user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    # Prevent admin from changing their own role
-    if user.id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change your own role",
-        )
-
-    user.role = role
-    user.updated_at = datetime.utcnow()
-    await db.commit()
-
-    return MessageResponse(message=f"User role updated to {role.value} successfully")
-
-
+# Deactivate User - Admin endpoint
 @router.delete("/users/{user_id}/deactivate", response_model=MessageResponse)
 async def deactivate_user(
     user_id: int,
@@ -463,6 +432,7 @@ async def deactivate_user(
     return MessageResponse(message="User account deactivated successfully")
 
 
+# Delete User - Admin endpoint
 @router.delete("/users/{user_id}/delete", response_model=MessageResponse)
 async def delete_user(
     user_id: int,
@@ -496,3 +466,45 @@ async def delete_user(
         )
 
     return MessageResponse(message="User account fully deleted successfully")
+
+
+# Update User Role - Admin endpoint
+@router.put("/users/{user_id}/role", response_model=MessageResponse)
+async def update_user_role(
+    user_id: int,
+    role: UserRole,
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update user role (admin only).
+
+    Args:
+        user_id: User ID
+        role: New role
+        current_user: Current admin user
+        db: Database session
+
+    Returns:
+        MessageResponse: Success message
+    """
+    auth_service = AuthService(db)
+    user = await auth_service.get_user_by_id(user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # Prevent admin from changing their own role
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own role",
+        )
+
+    user.role = role
+    user.updated_at = datetime.utcnow()
+    await db.commit()
+
+    return MessageResponse(message=f"User role updated to {role.value} successfully")
