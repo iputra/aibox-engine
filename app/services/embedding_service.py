@@ -1,19 +1,20 @@
 """
-Embedding service using llama.cpp with Nomic embedding model.
+Embedding service using LangChain with llama.cpp and Nomic embedding model.
 """
 
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from decouple import config
-from llama_cpp import Llama
+from langchain_community.embeddings import LlamaCppEmbeddings
+from langchain_core.embeddings import Embeddings
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
-    """Service for generating text embeddings using llama.cpp."""
+    """Service for generating text embeddings using LangChain with llama.cpp."""
 
     def __init__(
         self,
@@ -21,6 +22,7 @@ class EmbeddingService:
         n_ctx: int = 2048,
         n_batch: int = 512,
         n_gpu_layers: int = 0,
+        embedding_dimension: int = 768,
     ):
         """
         Initialize embedding service.
@@ -30,6 +32,7 @@ class EmbeddingService:
             n_ctx: Context size
             n_batch: Batch size for processing
             n_gpu_layers: Number of layers to offload to GPU
+            embedding_dimension: Dimension of the embedding vectors
         """
         self.model_path = model_path or config(
             "NOMIC_EMBED_MODEL_PATH",
@@ -38,13 +41,13 @@ class EmbeddingService:
         self.n_ctx = n_ctx
         self.n_batch = n_batch
         self.n_gpu_layers = n_gpu_layers
-        self.embedding_dim = 768  # Nomic embed text v1.5 dimension
+        self.embedding_dim = embedding_dimension  # Nomic embed text v1.5 dimension
 
-        self.model = None
+        self.embeddings: Optional[Embeddings] = None
         self._load_model()
 
     def _load_model(self):
-        """Load the embedding model."""
+        """Load the embedding model using LangChain."""
         try:
             if not os.path.exists(self.model_path):
                 logger.error(f"Model file not found: {self.model_path}")
@@ -52,19 +55,18 @@ class EmbeddingService:
                 return
 
             logger.info(f"Loading embedding model from {self.model_path}")
-            self.model = Llama(
+            self.embeddings = LlamaCppEmbeddings(
                 model_path=self.model_path,
                 n_ctx=self.n_ctx,
                 n_batch=self.n_batch,
                 n_gpu_layers=self.n_gpu_layers,
-                embedding=True,  # Enable embedding mode
                 verbose=False,
             )
             logger.info("Embedding model loaded successfully")
 
         except Exception as e:
             logger.error(f"Failed to load embedding model: {str(e)}")
-            self.model = None
+            self.embeddings = None
 
     def is_model_loaded(self) -> bool:
         """
@@ -73,11 +75,11 @@ class EmbeddingService:
         Returns:
             True if model is loaded, False otherwise
         """
-        return self.model is not None
+        return self.embeddings is not None
 
     def generate_embedding(self, text: str) -> Optional[List[float]]:
         """
-        Generate embedding for a single text.
+        Generate embedding for a single text using LangChain.
 
         Args:
             text: Text to embed
@@ -97,14 +99,10 @@ class EmbeddingService:
             # Clean and prepare text
             text = text.strip()
 
-            # Generate embedding
-            embedding = self.model.embed(text)
+            # Generate embedding using LangChain
+            embedding = self.embeddings.embed_query(text)
 
-            # Convert to list if needed
-            if isinstance(embedding, list):
-                return embedding
-            else:
-                return embedding.tolist()
+            return embedding
 
         except Exception as e:
             logger.error(f"Error generating embedding: {str(e)}")
@@ -112,7 +110,7 @@ class EmbeddingService:
 
     def generate_embeddings_batch(self, texts: List[str]) -> List[Optional[List[float]]]:
         """
-        Generate embeddings for multiple texts.
+        Generate embeddings for multiple texts using LangChain.
 
         Args:
             texts: List of texts to embed
@@ -124,23 +122,41 @@ class EmbeddingService:
             logger.error("Embedding model not loaded")
             return [None] * len(texts)
 
-        embeddings = []
+        try:
+            # Filter out empty texts
+            valid_texts = []
+            valid_indices = []
 
-        for i, text in enumerate(texts):
-            if i % 10 == 0:
-                logger.info(f"Processing embedding {i+1}/{len(texts)}")
+            for i, text in enumerate(texts):
+                if text and text.strip():
+                    valid_texts.append(text.strip())
+                    valid_indices.append(i)
 
-            embedding = self.generate_embedding(text)
-            embeddings.append(embedding)
+            if not valid_texts:
+                logger.warning("No valid texts provided for embedding")
+                return [None] * len(texts)
 
-        successful_embeddings = sum(1 for e in embeddings if e is not None)
-        logger.info(f"Generated {successful_embeddings}/{len(texts)} embeddings successfully")
+            # Generate embeddings using LangChain's batch processing
+            embeddings = self.embeddings.embed_documents(valid_texts)
 
-        return embeddings
+            # Map results back to original indices
+            result = [None] * len(texts)
+            for i, embedding in zip(valid_indices, embeddings):
+                result[i] = embedding
 
-    def generate_embeddings_for_chunks(self, chunks: List[dict]) -> List[dict]:
+            successful_embeddings = sum(1 for e in result if e is not None)
+            logger.info(f"Generated {successful_embeddings}/{len(texts)} embeddings successfully")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in batch embedding generation: {str(e)}")
+            # Fallback to individual processing
+            return [self.generate_embedding(text) for text in texts]
+
+    def generate_embeddings_for_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Generate embeddings for document chunks.
+        Generate embeddings for document chunks using LangChain.
 
         Args:
             chunks: List of chunk dictionaries with content and metadata
@@ -199,6 +215,59 @@ class EmbeddingService:
                 float(value)
             return True
         except (ValueError, TypeError):
+            return False
+
+    def get_embedding_info(self) -> Dict[str, Any]:
+        """
+        Get information about the embedding service.
+
+        Returns:
+            Dictionary with embedding service information
+        """
+        return {
+            "model_path": self.model_path,
+            "model_loaded": self.is_model_loaded(),
+            "embedding_dimension": self.embedding_dim,
+            "n_ctx": self.n_ctx,
+            "n_batch": self.n_batch,
+            "n_gpu_layers": self.n_gpu_layers,
+            "backend": "langchain",
+            "provider": "llama.cpp",
+        }
+
+    def update_model_config(self,
+                           n_ctx: Optional[int] = None,
+                           n_batch: Optional[int] = None,
+                           n_gpu_layers: Optional[int] = None) -> bool:
+        """
+        Update model configuration and reload the model.
+
+        Args:
+            n_ctx: New context size
+            n_batch: New batch size
+            n_gpu_layers: New GPU layers count
+
+        Returns:
+            True if update was successful, False otherwise
+        """
+        try:
+            # Update configuration
+            if n_ctx is not None:
+                self.n_ctx = n_ctx
+            if n_batch is not None:
+                self.n_batch = n_batch
+            if n_gpu_layers is not None:
+                self.n_gpu_layers = n_gpu_layers
+
+            # Reload the model with new configuration
+            self._load_model()
+
+            logger.info(f"Updated model configuration: ctx={self.n_ctx}, "
+                       f"batch={self.n_batch}, gpu_layers={self.n_gpu_layers}")
+            return self.is_model_loaded()
+
+        except Exception as e:
+            logger.error(f"Failed to update model configuration: {str(e)}")
             return False
 
     @staticmethod
