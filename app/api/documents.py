@@ -5,20 +5,24 @@ Document API endpoints for AIBox Engine.
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.schemas import (
+    AdvancedSearchQuery,
+    AdvancedSearchResponse,
     DocumentResponse,
     DocumentUpdate,
     FileUploadResponse,
+    KeywordSearchQuery,
     SearchQuery,
     SearchResponse,
     UserResponse,
 )
 from app.services.document_service import DocumentService
+
 
 logger = logging.getLogger(__name__)
 
@@ -255,4 +259,138 @@ async def get_service_health():
         ),
         "model_path": document_service.embedding_service.model_path,
         "embedding_dimension": document_service.embedding_service.get_embedding_dimension(),
+    }
+
+
+# Advanced Search Endpoints
+@router.post("/search/advanced", response_model=AdvancedSearchResponse)
+async def search_documents_advanced(
+    search_query: AdvancedSearchQuery,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Advanced search documents with semantic, keyword, or hybrid approach.
+
+    Features:
+    - Semantic search: Vector-based similarity search
+    - Keyword search: Text-based search with fuzzy matching
+    - Hybrid search: Combines semantic and keyword search with weighted scores
+    - Advanced filtering: Date range, file types, file size, filename patterns
+    - Multiple sort options: Relevance, date, filename, file size
+    - Pagination support with offset/limit
+    """
+    try:
+        results = await document_service.search_documents_advanced(
+            db=db,
+            user_id=current_user.id,
+            search_query=search_query,
+        )
+
+        if results is None:
+            raise HTTPException(status_code=500, detail="Advanced search failed")
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error performing advanced search: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/search/keyword", response_model=AdvancedSearchResponse)
+async def search_documents_keyword(
+    search_query: KeywordSearchQuery,
+    current_user: UserResponse = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Search documents using keyword-based search with PostgreSQL text search.
+
+    Features:
+    - Case-insensitive text matching
+    - Fuzzy search with trigram similarity (optional)
+    - Advanced filtering: Date range, file types, file size, filename patterns
+    - Multiple sort options: Relevance, date, filename, file size
+    - Pagination support with offset/limit
+    """
+    try:
+        results = await document_service.search_documents_keyword(
+            db=db,
+            user_id=current_user.id,
+            search_query=search_query,
+        )
+
+        if results is None:
+            raise HTTPException(status_code=500, detail="Keyword search failed")
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error performing keyword search: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/search/filters/info")
+async def get_search_filters_info():
+    """Get information about available search filters and options."""
+    return {
+        "search_types": {
+            "semantic": {
+                "description": "Vector-based semantic similarity search",
+                "requires_embedding_model": True,
+                "best_for": "Concept-based queries, finding related content"
+            },
+            "keyword": {
+                "description": "Text-based keyword search with optional fuzzy matching",
+                "requires_embedding_model": False,
+                "best_for": "Exact term matching, specific phrase searches"
+            },
+            "hybrid": {
+                "description": "Combines semantic and keyword search with weighted scoring",
+                "requires_embedding_model": True,
+                "best_for": "Balanced search results, leveraging both approaches"
+            }
+        },
+        "filters": {
+            "file_types": {
+                "description": "Filter by document file type",
+                "supported_types": ["pdf", "docx", "txt", "csv", "md", "html"]
+            },
+            "date_range": {
+                "description": "Filter documents by creation date",
+                "format": "ISO 8601 datetime (YYYY-MM-DDTHH:MM:SS)"
+            },
+            "file_size": {
+                "description": "Filter by file size in bytes",
+                "min_max_filter": True
+            },
+            "filename_pattern": {
+                "description": "Filter by filename using SQL LIKE pattern",
+                "examples": ["%.pdf", "report_%", "2023%"]
+            }
+        },
+        "sort_options": {
+            "relevance": "Sort by search relevance score",
+            "date_asc": "Sort by creation date (oldest first)",
+            "date_desc": "Sort by creation date (newest first)",
+            "filename_asc": "Sort by filename (A-Z)",
+            "filename_desc": "Sort by filename (Z-A)",
+            "file_size_asc": "Sort by file size (smallest first)",
+            "file_size_desc": "Sort by file size (largest first)"
+        },
+        "pagination": {
+            "limit": "Number of results to return (1-100, default: 10)",
+            "offset": "Number of results to skip (default: 0)",
+            "has_more": "Indicates if more results are available"
+        },
+        "scoring": {
+            "similarity_score": "Semantic similarity score (0.0-1.0)",
+            "keyword_score": "Keyword match score (0.0-1.0)",
+            "hybrid_score": "Combined weighted score (0.0-1.0)",
+            "similarity_weight": "Weight for semantic search in hybrid mode (0.0-1.0, default: 0.7)"
+        }
     }

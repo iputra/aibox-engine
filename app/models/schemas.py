@@ -273,6 +273,94 @@ class SearchResponse(BaseModel):
     search_time: float  # in seconds
 
 
+# Advanced Search Schemas
+class SearchType(str, Enum):
+    """Search type enumeration."""
+    SEMANTIC = "semantic"
+    KEYWORD = "keyword"
+    HYBRID = "hybrid"
+
+
+class SortOrder(str, Enum):
+    """Sort order enumeration."""
+    RELEVANCE = "relevance"
+    DATE_ASC = "date_asc"
+    DATE_DESC = "date_desc"
+    FILENAME_ASC = "filename_asc"
+    FILENAME_DESC = "filename_desc"
+    FILE_SIZE_ASC = "file_size_asc"
+    FILE_SIZE_DESC = "file_size_desc"
+
+
+class SearchFilters(BaseModel):
+    """Schema for search filters."""
+
+    file_types: Optional[List[str]] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    min_file_size: Optional[int] = None  # in bytes
+    max_file_size: Optional[int] = None  # in bytes
+    filename_pattern: Optional[str] = None  # SQL LIKE pattern
+
+
+class AdvancedSearchQuery(BaseModel):
+    """Schema for advanced search query."""
+
+    query: str = Field(..., min_length=1, max_length=1000)
+    search_type: SearchType = SearchType.HYBRID
+    limit: int = Field(10, ge=1, le=100)
+    offset: int = Field(0, ge=0)
+    threshold: float = Field(0.7, ge=0.0, le=1.0)
+    filters: Optional[SearchFilters] = None
+    sort_by: SortOrder = SortOrder.RELEVANCE
+    include_content: bool = True  # include chunk content in results
+    similarity_weight: float = Field(0.7, ge=0.0, le=1.0)  # weight for hybrid search
+
+
+class AdvancedSearchResult(BaseModel):
+    """Schema for advanced search result."""
+
+    document_id: int
+    document_filename: str
+    document_title: Optional[str] = None
+    document_file_type: str
+    document_file_size: int
+    document_created_at: datetime
+    chunk_id: Optional[int] = None  # None for document-level results
+    chunk_content: Optional[str] = None
+    chunk_index: Optional[int] = None
+    similarity_score: Optional[float] = None  # For semantic search
+    keyword_score: Optional[float] = None  # For keyword search
+    hybrid_score: Optional[float] = None  # Combined score for hybrid search
+    match_type: SearchType  # What type of search found this result
+
+
+class AdvancedSearchResponse(BaseModel):
+    """Schema for advanced search response."""
+
+    query: str
+    search_type: SearchType
+    total_results: int
+    results: List[AdvancedSearchResult]
+    search_time: float  # in seconds
+    has_more: bool  # for pagination
+    limit: int
+    offset: int
+
+
+class KeywordSearchQuery(BaseModel):
+    """Schema for keyword-based search query."""
+
+    query: str = Field(..., min_length=1, max_length=1000)
+    limit: int = Field(10, ge=1, le=100)
+    offset: int = Field(0, ge=0)
+    filters: Optional[SearchFilters] = None
+    sort_by: SortOrder = SortOrder.RELEVANCE
+    include_content: bool = True
+    use_fuzzy_search: bool = True
+    min_word_match: int = Field(1, ge=1, le=10)  # minimum words to match
+
+
 # File upload schemas
 class FileUploadResponse(BaseModel):
     """Schema for file upload response."""
