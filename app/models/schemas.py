@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserRole(str, Enum):
@@ -25,7 +25,8 @@ class UserBase(BaseModel):
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
 
-    @validator("username")
+    @field_validator("username")
+    @classmethod
     def validate_username(cls, v):
         """Validate username format."""
         if not v.strip():
@@ -41,7 +42,8 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=100)
     role: UserRole = UserRole.USER
 
-    @validator("password")
+    @field_validator("password")
+    @classmethod
     def validate_password(cls, v):
         """Validate password strength."""
         if len(v) < 8:
@@ -124,7 +126,8 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=100)
 
-    @validator("new_password")
+    @field_validator("new_password")
+    @classmethod
     def validate_new_password(cls, v):
         """Validate new password strength."""
         if len(v) < 8:
@@ -150,7 +153,8 @@ class PasswordResetConfirm(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8, max_length=100)
 
-    @validator("new_password")
+    @field_validator("new_password")
+    @classmethod
     def validate_new_password(cls, v):
         """Validate new password strength."""
         if len(v) < 8:
@@ -283,3 +287,187 @@ class FileUploadResponse(BaseModel):
     file_size: int
     file_type: str
     processing_status: str
+
+
+# Chat Schemas
+class MessageRole(str, Enum):
+    """Message role enumeration."""
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class ChatSessionBase(BaseModel):
+    """Base chat session schema."""
+
+    title: Optional[str] = None
+    persona_id: Optional[str] = None
+    temperature: str = "0.7"
+    max_tokens: int = 1000
+    system_prompt: Optional[str] = None
+    include_document_context: bool = True
+    max_document_references: int = 5
+    document_search_threshold: str = "0.7"
+    is_public: bool = False
+
+
+class ChatSessionCreate(ChatSessionBase):
+    """Schema for creating chat session."""
+    pass  # user_id will be set from authenticated user
+
+
+class ChatSessionUpdate(BaseModel):
+    """Schema for updating chat session."""
+
+    title: Optional[str] = None
+    persona_id: Optional[str] = None
+    temperature: Optional[str] = None
+    max_tokens: Optional[int] = None
+    system_prompt: Optional[str] = None
+    include_document_context: Optional[bool] = None
+    max_document_references: Optional[int] = None
+    document_search_threshold: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
+class ChatSessionResponse(ChatSessionBase):
+    """Schema for chat session response."""
+
+    id: int
+    user_id: int
+    share_token: Optional[str] = None
+    is_active: bool
+    last_message_at: Optional[datetime] = None
+    message_count: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentCitation(BaseModel):
+    """Schema for document citation in chat messages."""
+
+    document_id: int
+    document_filename: str
+    document_title: Optional[str] = None
+    chunk_id: Optional[int] = None
+    chunk_content: Optional[str] = None
+    similarity_score: Optional[float] = None
+    page_number: Optional[int] = None
+
+
+class ChatMessageBase(BaseModel):
+    """Base chat message schema."""
+
+    role: MessageRole
+    content: str
+
+
+class ChatMessageCreate(ChatMessageBase):
+    """Schema for creating chat message."""
+
+    session_id: int
+
+
+class ChatMessageResponse(ChatMessageBase):
+    """Schema for chat message response."""
+
+    id: int
+    session_id: int
+    token_count: Optional[int] = None
+    model_used: Optional[str] = None
+    processing_time: Optional[str] = None
+    document_references: Optional[List[DocumentCitation]] = None
+    search_results: Optional[dict] = None
+    is_edited: bool
+    edited_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSessionWithMessages(ChatSessionResponse):
+    """Schema for chat session with its messages."""
+
+    messages: List[ChatMessageResponse] = []
+
+
+class SendMessageRequest(BaseModel):
+    """Schema for sending a message."""
+
+    message: str = Field(..., min_length=1, max_length=4000)
+    session_id: Optional[int] = None  # If None, creates new session
+    stream: bool = True  # Whether to stream response
+    search_documents: bool = True  # Whether to search documents for context
+
+
+class SendMessageResponse(BaseModel):
+    """Schema for send message response."""
+
+    session_id: int
+    message_id: int
+    response: str
+    document_citations: List[DocumentCitation] = []
+    search_time: Optional[float] = None
+    generation_time: Optional[float] = None
+    total_time: Optional[float] = None
+
+
+class ChatFolderBase(BaseModel):
+    """Base chat folder schema."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    color: Optional[str] = None
+    parent_id: Optional[int] = None
+
+
+class ChatFolderCreate(ChatFolderBase):
+    """Schema for creating chat folder."""
+
+    user_id: int
+
+
+class ChatFolderResponse(ChatFolderBase):
+    """Schema for chat folder response."""
+
+    id: int
+    user_id: int
+    is_active: bool
+    chat_count: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AddChatToFolderRequest(BaseModel):
+    """Schema for adding chat to folder."""
+
+    session_id: int
+    folder_id: int
+
+
+class ChatSearchQuery(BaseModel):
+    """Schema for searching chat sessions."""
+
+    query: Optional[str] = None
+    folder_id: Optional[int] = None
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+    is_public: Optional[bool] = None
+    limit: int = Field(20, ge=1, le=100)
+    offset: int = Field(0, ge=0)
+
+
+class ChatSearchResponse(BaseModel):
+    """Schema for chat search response."""
+
+    total_results: int
+    results: List[ChatSessionResponse]
+    has_more: bool

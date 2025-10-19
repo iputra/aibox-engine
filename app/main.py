@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from scalar_fastapi import get_scalar_api_reference
 
-from app.api import auth, documents
+from app.api import auth, chat, documents
 
 # Core modules
 from app.core.database import init_db, test_db_connection
@@ -134,6 +134,7 @@ async def app_info():
 # Include API routes
 app.include_router(auth.router, prefix="/api/v1/auth")
 app.include_router(documents.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
 
 # Placeholder for future route includes
 # app.include_router(llm.router, prefix="/api/v1/llm", tags=["LLM Service"])
