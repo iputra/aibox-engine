@@ -38,7 +38,7 @@ async def upload_document(
     """
     Upload a new document for processing and indexing.
 
-    Supported file types: PDF, DOCX, TXT
+    Supported file types: PDF, DOCX, TXT, CSV, Markdown, HTML
     Maximum file size: 50MB
     """
     try:

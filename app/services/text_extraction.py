@@ -1,24 +1,68 @@
 """
-Text extraction services for different document types.
+Text extraction services for different document types using LangChain loaders.
 """
 
 import logging
 import os
 from typing import Optional
 
-import docx
-import PyPDF2
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    Docx2txtLoader,
+    TextLoader,
+    CSVLoader,
+    UnstructuredMarkdownLoader,
+    UnstructuredHTMLLoader,
+)
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
 
 class TextExtractionService:
-    """Service for extracting text from various document types."""
+    """Service for extracting text from various document types using LangChain loaders."""
+
+    @staticmethod
+    def _extract_with_langchain_loader(file_path: str, loader_class, **loader_kwargs) -> Optional[str]:
+        """
+        Extract text using a LangChain loader.
+
+        Args:
+            file_path: Path to the file
+            loader_class: LangChain loader class to use
+            **loader_kwargs: Additional arguments for the loader
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        try:
+            loader = loader_class(file_path, **loader_kwargs)
+            documents = loader.load()
+
+            if not documents:
+                logger.warning(f"No documents extracted from {file_path}")
+                return None
+
+            # Combine text from all pages/documents
+            extracted_text = '\n\n'.join(doc.page_content for doc in documents)
+
+            # Log extraction details
+            if hasattr(loader, 'file_path'):
+                file_type = os.path.splitext(loader.file_path)[1].lower()
+            else:
+                file_type = loader_class.__name__
+
+            logger.info(f"Extracted {len(extracted_text)} characters from {file_type} file with {len(documents)} pages/sections")
+            return extracted_text if extracted_text.strip() else None
+
+        except Exception as e:
+            logger.error(f"Error extracting text with {loader_class.__name__} from {file_path}: {str(e)}")
+            return None
 
     @staticmethod
     def extract_text_from_pdf(file_path: str) -> Optional[str]:
         """
-        Extract text from PDF file.
+        Extract text from PDF file using LangChain's PyPDFLoader.
 
         Args:
             file_path: Path to PDF file
@@ -26,30 +70,15 @@ class TextExtractionService:
         Returns:
             Extracted text or None if extraction fails
         """
-        try:
-            text = []
-            with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                num_pages = len(pdf_reader.pages)
-
-                for page_num in range(num_pages):
-                    page = pdf_reader.pages[page_num]
-                    page_text = page.extract_text()
-                    if page_text.strip():
-                        text.append(page_text)
-
-            extracted_text = '\n\n'.join(text)
-            logger.info(f"Extracted {len(extracted_text)} characters from PDF with {num_pages} pages")
-            return extracted_text if extracted_text.strip() else None
-
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF {file_path}: {str(e)}")
-            return None
+        return TextExtractionService._extract_with_langchain_loader(
+            file_path,
+            PyPDFLoader
+        )
 
     @staticmethod
     def extract_text_from_docx(file_path: str) -> Optional[str]:
         """
-        Extract text from DOCX file.
+        Extract text from DOCX file using LangChain's Docx2txtLoader.
 
         Args:
             file_path: Path to DOCX file
@@ -57,26 +86,15 @@ class TextExtractionService:
         Returns:
             Extracted text or None if extraction fails
         """
-        try:
-            doc = docx.Document(file_path)
-            text = []
-
-            for paragraph in doc.paragraphs:
-                if paragraph.text.strip():
-                    text.append(paragraph.text)
-
-            extracted_text = '\n\n'.join(text)
-            logger.info(f"Extracted {len(extracted_text)} characters from DOCX with {len(text)} paragraphs")
-            return extracted_text if extracted_text.strip() else None
-
-        except Exception as e:
-            logger.error(f"Error extracting text from DOCX {file_path}: {str(e)}")
-            return None
+        return TextExtractionService._extract_with_langchain_loader(
+            file_path,
+            Docx2txtLoader
+        )
 
     @staticmethod
     def extract_text_from_txt(file_path: str) -> Optional[str]:
         """
-        Extract text from TXT file.
+        Extract text from TXT file using LangChain's TextLoader.
 
         Args:
             file_path: Path to TXT file
@@ -85,32 +103,77 @@ class TextExtractionService:
             Extracted text or None if extraction fails
         """
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                text = file.read()
-
-            extracted_text = text.strip()
-            logger.info(f"Extracted {len(extracted_text)} characters from TXT file")
-            return extracted_text if extracted_text else None
-
-        except UnicodeDecodeError:
-            # Try with different encoding
-            try:
-                with open(file_path, 'r', encoding='latin-1') as file:
-                    text = file.read()
-                extracted_text = text.strip()
-                logger.info(f"Extracted {len(extracted_text)} characters from TXT file (latin-1 encoding)")
-                return extracted_text if extracted_text else None
-            except Exception as e:
-                logger.error(f"Error extracting text from TXT {file_path}: {str(e)}")
-                return None
+            # Try with UTF-8 encoding first
+            return TextExtractionService._extract_with_langchain_loader(
+                file_path,
+                TextLoader,
+                encoding='utf-8'
+            )
         except Exception as e:
-            logger.error(f"Error extracting text from TXT {file_path}: {str(e)}")
-            return None
+            # Fallback to latin-1 encoding
+            logger.warning(f"UTF-8 extraction failed, trying latin-1: {str(e)}")
+            try:
+                return TextExtractionService._extract_with_langchain_loader(
+                    file_path,
+                    TextLoader,
+                    encoding='latin-1'
+                )
+            except Exception as e2:
+                logger.error(f"Both encodings failed for TXT {file_path}: {str(e2)}")
+                return None
+
+    @staticmethod
+    def extract_text_from_csv(file_path: str) -> Optional[str]:
+        """
+        Extract text from CSV file using LangChain's CSVLoader.
+
+        Args:
+            file_path: Path to CSV file
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        return TextExtractionService._extract_with_langchain_loader(
+            file_path,
+            CSVLoader
+        )
+
+    @staticmethod
+    def extract_text_from_markdown(file_path: str) -> Optional[str]:
+        """
+        Extract text from Markdown file using LangChain's UnstructuredMarkdownLoader.
+
+        Args:
+            file_path: Path to Markdown file
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        return TextExtractionService._extract_with_langchain_loader(
+            file_path,
+            UnstructuredMarkdownLoader
+        )
+
+    @staticmethod
+    def extract_text_from_html(file_path: str) -> Optional[str]:
+        """
+        Extract text from HTML file using LangChain's UnstructuredHTMLLoader.
+
+        Args:
+            file_path: Path to HTML file
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        return TextExtractionService._extract_with_langchain_loader(
+            file_path,
+            UnstructuredHTMLLoader
+        )
 
     @staticmethod
     def extract_text(file_path: str, file_type: str) -> Optional[str]:
         """
-        Extract text from file based on its type.
+        Extract text from file based on its type using LangChain loaders.
 
         Args:
             file_path: Path to the file
@@ -129,6 +192,11 @@ class TextExtractionService:
             'pdf': TextExtractionService.extract_text_from_pdf,
             'docx': TextExtractionService.extract_text_from_docx,
             'txt': TextExtractionService.extract_text_from_txt,
+            'csv': TextExtractionService.extract_text_from_csv,
+            'md': TextExtractionService.extract_text_from_markdown,
+            'markdown': TextExtractionService.extract_text_from_markdown,
+            'html': TextExtractionService.extract_text_from_html,
+            'htm': TextExtractionService.extract_text_from_html,
         }
 
         extractor = extraction_methods.get(file_type)
@@ -146,7 +214,7 @@ class TextExtractionService:
         Returns:
             List of supported file extensions
         """
-        return ['pdf', 'docx', 'txt']
+        return ['pdf', 'docx', 'txt', 'csv', 'md', 'markdown', 'html', 'htm']
 
     @staticmethod
     def is_supported_file_type(file_type: str) -> bool:
