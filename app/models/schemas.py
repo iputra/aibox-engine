@@ -417,6 +417,19 @@ class SendMessageResponse(BaseModel):
     total_time: Optional[float] = None
 
 
+class StreamingChunk(BaseModel):
+    """Schema for streaming response chunk."""
+
+    content: str
+    session_id: int
+    message_id: Optional[int] = None
+    document_citations: List[DocumentCitation] = []
+    finished: bool = False
+    search_time: Optional[float] = None
+    generation_time: Optional[float] = None
+    total_time: Optional[float] = None
+
+
 class ChatFolderBase(BaseModel):
     """Base chat folder schema."""
 

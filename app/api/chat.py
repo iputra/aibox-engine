@@ -6,6 +6,7 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -22,6 +23,7 @@ from app.models.schemas import (
     ChatSessionWithMessages,
     SendMessageRequest,
     SendMessageResponse,
+    StreamingChunk,
     UserResponse,
 )
 from app.services.chat_service import ChatService
@@ -179,7 +181,7 @@ async def get_user_chat_sessions(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/send-message", response_model=SendMessageResponse)
+@router.post("/send-message")
 async def send_message(
     message_request: SendMessageRequest,
     current_user: UserResponse = Depends(get_current_user),
@@ -196,19 +198,59 @@ async def send_message(
     - Multi-turn conversation support
     - Streaming support (configurable)
 
+    Streaming Behavior:
+    - If stream=true: Returns StreamingResponse with real-time chunks
+    - If stream=false: Returns regular SendMessageResponse
+
     Document Integration:
     - Automatically searches user's documents for relevant context
     - Provides citations with similarity scores
     - Limits references based on session settings
     """
     try:
-        response = await chat_service.send_message(
-            db, current_user.id, message_request
-        )
-        if not response:
-            raise HTTPException(status_code=500, detail="Failed to send message")
+        # Check if streaming is requested
+        if message_request.stream:
+            async def generate_stream():
+                """Generator function for streaming response."""
+                async for chunk in chat_service.send_message_stream(
+                    db, current_user.id, message_request
+                ):
+                    if chunk is None:
+                        # Send error chunk
+                        error_chunk = StreamingChunk(
+                            content="",
+                            session_id=0,
+                            finished=True,
+                        ).model_dump_json()
+                        yield f"data: {error_chunk}\n\n"
+                        break
 
-        return response
+                    # Send chunk as Server-Sent Events
+                    chunk_json = chunk.model_dump_json()
+                    yield f"data: {chunk_json}\n\n"
+
+                # Send final message
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                generate_stream(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Cache-Control",
+                }
+            )
+        else:
+            # Regular non-streaming response
+            response = await chat_service.send_message(
+                db, current_user.id, message_request
+            )
+            if not response:
+                raise HTTPException(status_code=500, detail="Failed to send message")
+
+            return response
 
     except HTTPException:
         raise

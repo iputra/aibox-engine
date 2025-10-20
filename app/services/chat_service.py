@@ -2,6 +2,7 @@
 Chat service for AIBox Engine conversation system with document context.
 """
 
+import json
 import logging
 import secrets
 import time
@@ -27,6 +28,7 @@ from app.models.schemas import (
     MessageRole,
     SendMessageRequest,
     SendMessageResponse,
+    StreamingChunk,
 )
 from app.services.document_service import DocumentService
 from app.services.llm_service import LLMService
@@ -277,7 +279,7 @@ class ChatService:
         try:
             query = (
                 select(ChatSession)
-                .where(ChatSession.user_id == user_id, ChatSession.is_active == True)
+                .where(ChatSession.user_id == user_id, ChatSession.is_active)
                 .order_by(ChatSession.last_message_at.desc().nulls_last())
                 .limit(limit)
                 .offset(offset)
@@ -311,7 +313,7 @@ class ChatService:
         """
         try:
             # Build base query
-            query = select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.is_active == True)
+            query = select(ChatSession).where(ChatSession.user_id == user_id, ChatSession.is_active)
 
             # Apply filters
             if search_query.query:
@@ -415,7 +417,7 @@ class ChatService:
             # Generate AI response
             generation_start = time.time()
             ai_response = await self._generate_ai_response(
-                message_request.message, document_citations, session
+                message_request.message, document_citations, session, message_request.stream
             )
             generation_time = time.time() - generation_start
 
@@ -459,18 +461,198 @@ class ChatService:
             await db.rollback()
             return None
 
-    async def _search_documents_for_context(
+    async def send_message_stream(
         self,
         db: AsyncSession,
         user_id: int,
-        query: str,
-        session: ChatSessionResponse,
+        message_request: SendMessageRequest,
+    ):
+        """
+        Send a message and get streaming AI response with document context.
+
+        Args:
+            db: Database session
+            user_id: User ID
+            message_request: Message request data
+
+        Yields:
+            StreamingChunk objects with partial responses
+        """
+        try:
+            start_time = time.time()
+
+            # Get or create chat session
+            session = None
+            if message_request.session_id:
+                session = await self.get_chat_session(db, message_request.session_id, user_id)
+
+            if not session:
+                # Create new session
+                session_data = ChatSessionCreate(
+                    user_id=user_id,
+                    title=self._generate_session_title(message_request.message),
+                    include_document_context=message_request.search_documents,
+                )
+                session = await self.create_chat_session(db, session_data, user_id)
+
+            if not session:
+                logger.error("Failed to get or create chat session")
+                yield None
+                return
+
+            # Save user message
+            user_message = ChatMessage(
+                session_id=session.id,
+                role=MessageRole.USER,
+                content=message_request.message,
+            )
+            db.add(user_message)
+            await db.flush()
+
+            # Search documents for context if enabled
+            document_citations = []
+            search_time = None
+
+            if message_request.search_documents and session.include_document_context:
+                search_start = time.time()
+                search_results = await self._search_documents_for_context(
+                    db, user_id, message_request.message, session
+                )
+                search_time = time.time() - search_start
+
+                if search_results:
+                    document_citations = self._extract_document_citations(search_results)
+
+            # Create AI message record (will be updated as we stream)
+            ai_message = ChatMessage(
+                session_id=session.id,
+                role=MessageRole.ASSISTANT,
+                content="",
+                document_references=[citation.dict() for citation in document_citations],
+            )
+            db.add(ai_message)
+            await db.flush()
+
+            # Update session
+            await db.execute(
+                update(ChatSession)
+                .where(ChatSession.id == session.id)
+                .values(
+                    last_message_at=datetime.utcnow(),
+                    message_count=ChatSession.message_count + 1,
+                    updated_at=datetime.utcnow()
+                )
+            )
+            await db.commit()
+
+            # Start streaming response generation
+            generation_start = time.time()
+            accumulated_content = ""
+
+            # Build context from document citations
+            context_text = ""
+            if document_citations:
+                context_text = "Document Context:\n"
+                for i, citation in enumerate(document_citations[:5], 1):
+                    source_info = f"[{i}] From '{citation.document_filename}'"
+                    if citation.similarity_score:
+                        source_info += f" (relevance: {citation.similarity_score:.2f})"
+                    context_text += f"{source_info}:\n{citation.chunk_content[:300]}...\n\n"
+
+            # Build system prompt
+            system_prompt = session.system_prompt or (
+                "You are a helpful AI assistant with access to document context. "
+                "Use the provided document information to answer questions accurately. "
+                "Cite your sources using reference numbers in square brackets [1], [2], etc. "
+                "If the documents don't contain relevant information, say so politely and provide general knowledge."
+            )
+
+            # Build messages for LLM
+            messages = self.llm_service.build_context_messages(
+                user_message=message_request.message,
+                document_context=context_text if document_citations else None,
+                system_prompt=system_prompt,
+            )
+
+            # Stream response from LLM
+            async for chunk_data in self.llm_service.generate_response_stream(
+                messages=messages,
+                temperature=float(session.temperature),
+                max_tokens=session.max_tokens,
+            ):
+                try:
+                    # Parse the chunk data (it should be JSON string)
+                    if chunk_data and chunk_data.strip():
+                        chunk_json = json.loads(chunk_data)
+
+                        # Extract content from streaming response
+                        if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
+                            choice = chunk_json["choices"][0]
+                            if "delta" in choice and "content" in choice["delta"]:
+                                content_piece = choice["delta"]["content"]
+                                accumulated_content += content_piece
+
+                                # Send intermediate chunk
+                                chunk = StreamingChunk(
+                                    content=accumulated_content,
+                                    session_id=session.id,
+                                    message_id=ai_message.id,
+                                    finished=False,
+                                )
+                                yield chunk
+
+                except json.JSONDecodeError:
+                    # Skip invalid JSON chunks
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error processing streaming chunk: {str(e)}")
+                    continue
+
+            # Calculate timing
+            generation_time = time.time() - generation_start
+            total_time = time.time() - start_time
+
+            # Update AI message with final content
+            await db.execute(
+                update(ChatMessage)
+                .where(ChatMessage.id == ai_message.id)
+                .values(
+                    content=accumulated_content,
+                    processing_time=f"{generation_time:.2f}",
+                )
+            )
+            await db.commit()
+
+            # Send final chunk with all metadata
+            final_chunk = StreamingChunk(
+                content=accumulated_content,
+                session_id=session.id,
+                message_id=ai_message.id,
+                document_citations=document_citations,
+                finished=True,
+                search_time=search_time,
+                generation_time=generation_time,
+                total_time=total_time,
+            )
+            yield final_chunk
+
+        except Exception as e:
+            logger.error(f"Error in streaming message: {str(e)}")
+            await db.rollback()
+            yield None
+
+    async def _search_documents_for_context(
+        self,
+        _db: AsyncSession,
+        _user_id: int,
+        _query: str,
+        _session: ChatSessionResponse,
     ) -> Optional[List[Any]]:
         """Search documents for chat context (simplified for testing)."""
         try:
             # For now, return None to test LLM without document context
             # TODO: Integrate with basic document search
-            logger.info(f"Document search temporarily disabled for query: {query}")
+            logger.info(f"Document search temporarily disabled for query: {_query}")
             return None
 
         except Exception as e:
@@ -497,6 +679,7 @@ class ChatService:
         user_message: str,
         document_citations: List[DocumentCitation],
         session: ChatSessionResponse,
+        stream: bool = False,
     ) -> str:
         """
         Generate AI response based on message and document context using LLM API.
@@ -544,7 +727,7 @@ class ChatService:
                 messages=messages,
                 temperature=float(session.temperature),
                 max_tokens=session.max_tokens,
-                stream=False,
+                stream=stream,
             )
 
             if response_data:
@@ -555,8 +738,7 @@ class ChatService:
             # Fallback to placeholder if LLM fails
             logger.warning("LLM generation failed, using fallback response")
             if document_citations:
-                return f"Based on the {len(document_citations)} documents I found, I can provide some information about '{user_message}'. However, I'm experiencing technical difficulties with the AI service. Please try again later."
-                # Removed - replaced with direct return
+                response = f"Based on the {len(document_citations)} documents I found, I can provide some information about '{user_message}'. However, I'm experiencing technical difficulties with the AI service. Please try again later."
                 response += "The documents suggest relevant information that addresses your question.\n\n"
                 response += "Please note: This is a placeholder response. In a production environment, this would connect to an actual AI model."
             else:
